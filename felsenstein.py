@@ -4,6 +4,7 @@ import tempfile
 from itertools import count
 from Bio import AlignIO, Phylo
 from pprint import pprint
+import json
 
 def clean_nexus_file(input_file, output_file):
     """
@@ -160,6 +161,10 @@ def main():
     # Optionally, print the ASCII representation of the tree
     print("\nASCII representation of the tree:")
     Phylo.draw_ascii(tree)
+
+    # Save the dictionary to a file called "node_state_dict.json"
+    with open("node_state_dict.json", "w") as outfile:
+        json.dump(node_state_dict, outfile, indent=2)
 
 if __name__ == "__main__":
     main()
