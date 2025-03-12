@@ -1,7 +1,0 @@
-{
-  "num_iters": 5000,
-  "learning_rate": 0.008,
-  "margin": 1.0,
-  "save_interval": 100,
-  "results_folder": "results\\20250312_130853"
-}
