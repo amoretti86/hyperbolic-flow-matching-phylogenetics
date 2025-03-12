@@ -139,6 +139,9 @@ def main():
     
     # Read the cleaned tree using Biopython's Phylo
     tree = Phylo.read(cleaned_tree_file, "nexus")
+    root = tree.root
+    print("Root node:", root)
+    print("Root node name:", root.name)
     
     # Parse the alignment file to get nucleotide data for each leaf
     leaf_data, n_sites = parse_alignment_file(alignment_file)

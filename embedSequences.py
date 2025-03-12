@@ -48,55 +48,110 @@ def compute_all_hyperbolic_distances(embeddings):
             dist_matrix[i, j] = hyperbolic_distance(embeddings[i], embeddings[j])
     return dist_matrix
 
+def embed_to_poincare(u):
+    """
+    Maps u in R^2 to z in the open unit disk via:
+        z = u / (1 + ||u||)
+    This guarantees ||z|| < 1 for any u.
+    """
+    norm = torch.norm(u, dim=1, keepdim=True)
+    return u / (1 + norm)
+
 def main():
-    # Load node_state_dict from JSON file (each key maps to a nucleotide string)
+    # ========================
+    # 1. LOAD DATA
+    # ========================
     with open("node_state_dict.json", "r") as f:
         node_state_dict = json.load(f)
+        print("node state dict:\n", node_state_dict)
     
-    # Create a list of (node_name, sequence)
+    # Convert node_state_dict to a list of (name, seq)
     nodes = list(node_state_dict.items())
     node_names = [name for name, seq in nodes]
     sequences = [seq for name, seq in nodes]
     n = len(sequences)
     print(f"Loaded {n} sequences.")
     
-    # Compute the Hamming distance matrix (as a NumPy array) and then convert to a tensor.
+    # Build the Hamming distance matrix
     hamming_mat = compute_hamming_matrix(sequences)
     hamming_mat = torch.tensor(hamming_mat, dtype=torch.float32)
     
-    # Initialize learnable parameters u for embeddings in R^2.
-    # We use the transformation z = tanh(u) to ensure that the embeddings lie inside the Poincaré disk.
-    u = torch.randn((n, 2), requires_grad=True)
-    optimizer = optim.Adam([u], lr=0.001)  # use a lower learning rate for stability
+    # ========================
+    # 2. SELECT ROOT NODE
+    # ========================
+    # Example: Suppose you decided "Internal_10" is the root. 
+    # Or if your tree is truly rooted, use that root name.
+    root_name = "Internal_10"
+    # Find index of root in node_names (or handle if not found)
+    if root_name not in node_names:
+        raise ValueError(f"Root node '{root_name}' not found in node_state_dict!")
+    root_idx = node_names.index(root_name)
     
-    # Optimize for a number of iterations.
+    # ========================
+    # 3. INITIALIZE PARAMETERS
+    # ========================
+    # We'll embed each node in R^2 as 'u_i', then map to z_i in the Poincaré disk.
+    u = torch.randn((n, 2), requires_grad=True)
+    optimizer = optim.Adam([u], lr=0.01)
+    
+    # Strength of the root penalty
+    lambda_root = 10.0  # tune this hyperparameter as desired
+    
+    # ========================
+    # 4. TRAINING LOOP
+    # ========================
     n_iters = 1000
-    for iter in range(n_iters):
+    for step in range(n_iters):
         optimizer.zero_grad()
-        embeddings = torch.tanh(u)  # Embedded points in the Poincaré disk, shape: (n,2)
+        
+        # Map to Poincaré disk
+        embeddings = embed_to_poincare(u)  # (n,2)
+        
+        # Compute pairwise hyperbolic distances
         hyper_dist = compute_all_hyperbolic_distances(embeddings)  # (n, n)
-        loss = torch.sum((hyper_dist - hamming_mat)**2)
+        
+        # Main distance matching loss
+        loss_dist = torch.sum((hyper_dist - hamming_mat)**2)
+        
+        # Root penalty: encourage root to be near origin
+        # Norm of the root node's embedding
+        root_embedding = embeddings[root_idx]
+        root_norm_sq = torch.sum(root_embedding**2)
+        loss_root = lambda_root * root_norm_sq
+        
+        # Total loss
+        loss = loss_dist + loss_root
+        
         loss.backward()
         optimizer.step()
         
-        if iter % 100 == 0:
-            print(f"Iteration {iter}, Loss: {loss.item()}")
-            # Check for nan
+        if step % 100 == 0:
+            print(f"Iteration {step}, Loss: {loss.item():.4f} "
+                  f"(Dist Loss: {loss_dist.item():.4f}, Root Penalty: {loss_root.item():.4f})")
+            
             if torch.isnan(loss):
-                print("Loss is nan, breaking out.")
+                print("Loss is NaN. Stopping training.")
                 break
     
-    # Retrieve final embeddings as a NumPy array.
-    final_embeddings = torch.tanh(u).detach().numpy()  # shape: (n,2)
+    # ========================
+    # 5. RETRIEVE EMBEDDINGS
+    # ========================
+    final_embeddings = embed_to_poincare(u).detach().numpy()  # shape: (n,2)
+    # Check norms
+    norms = np.linalg.norm(final_embeddings, axis=1)
+    if np.any(norms >= 1.0):
+        print("Warning: Some embeddings are on or outside the Poincaré disk boundary!")
     
-    # Create a dictionary mapping each node's name to its embedding (a list of two floats)
-    embedding_dict = {node_names[i]: final_embeddings[i].tolist() for i in range(n)}
+    # Build embedding dictionary
+    embedding_dict = {
+        node_names[i]: final_embeddings[i].tolist() for i in range(n)
+    }
     
-    # Save the embeddings to a JSON file.
+    # Save to JSON
     with open("node_embeddings.json", "w") as f:
         json.dump(embedding_dict, f, indent=2)
     
-    print("\nFinal Embeddings:")
+    print("\nFinal Embeddings (with root penalty):")
     for name, emb in embedding_dict.items():
         print(f"{name}: {emb}")
 
